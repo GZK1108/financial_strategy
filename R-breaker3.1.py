@@ -102,22 +102,14 @@ def judge(bar_data, context, RealFuture):
     else:
         # 反转策略
         if RealFuture in context.portfolio.long_positions.keys():  # 多仓
-            hold_cost_long = context.portfolio.long_positions[RealFuture].hold_cost  # 设置止损
-            if bar_data['close'][0] < hold_cost_long * (1 - g.stop_loss_price / 100):
-                order_target(RealFuture, 0, side='long')
-                print('止损平多仓')
-            elif (g.maxmin_price[RealFuture]['max'].values > break_price[RealFuture]['Ssetup'].values) and (bar_data['close'][0] < break_price[RealFuture]['Senter'].values) and (context.portfolio.available_cash > 500000):
+            if (g.maxmin_price[RealFuture]['max'].values > break_price[RealFuture]['Ssetup'].values) and (bar_data['close'][0] < break_price[RealFuture]['Senter'].values) and (context.portfolio.available_cash > 500000):
                 order_target(RealFuture, 0, side='long')  # 平仓
                 values = break_price[RealFuture]['Senter'].values * g.amount * multiple  # value = 最新价 * 手数 * 保证金率 * 乘数
                 order_value(RealFuture, values, style=StopMarketOrderStyle('stop_loss', break_price[RealFuture]['Senter'].values), side='short', pindex=0, close_today=False)
                 print('平仓开空仓'+str(RealFuture)+str(values))
 
         elif RealFuture in context.portfolio.short_positions.keys():  # 空仓
-            hold_cost_short = context.portfolio.short_positions[RealFuture].hold_cost  # 设置止损
-            if bar_data['close'][0] > hold_cost_short * (1 + g.stop_loss_price / 100):
-                order_target(RealFuture, 0, side='short')
-                print('止损平空仓')
-            elif (g.maxmin_price[RealFuture]['min'].values < break_price[RealFuture]['Bsetup'].values) and (bar_data['close'][0] > break_price[RealFuture]['Benter'].values) and (context.portfolio.available_cash > 500000):
+            if (g.maxmin_price[RealFuture]['min'].values < break_price[RealFuture]['Bsetup'].values) and (bar_data['close'][0] > break_price[RealFuture]['Benter'].values) and (context.portfolio.available_cash > 500000):
                 order_target(RealFuture, 0, side='short')  # 平仓
                 values = break_price[RealFuture]['Benter'].values * g.amount * multiple  # value = 最新价 * 手数 * 保证金率 * 乘数
                 order_value(RealFuture, values, style=StopMarketOrderStyle('stop_loss', break_price[RealFuture]['Benter'].values), side='long', pindex=0, close_today=False)
