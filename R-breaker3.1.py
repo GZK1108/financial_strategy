@@ -1,7 +1,3 @@
-# 克隆自聚宽文章：https://www.joinquant.com/post/26397
-# 标题：日内交易策略R-breaker - 300346.XSHE
-# 作者：Pole
-
 # 导入函数库
 from jqdata import *
 import numpy as np
