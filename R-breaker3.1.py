@@ -2,7 +2,6 @@
 from jqdata import *
 import numpy as np
 import pandas as pd
-from pandas import DataFrame as df
 import datetime
 import time
 
@@ -89,29 +88,29 @@ def judge(bar_data, context, RealFuture):
 
         if bar_data['close'][0] > break_price[RealFuture]['Bbreak'].values and context.portfolio.available_cash > 500000:
             # 在空仓的情况下，如果盘中价格超过突破买入价，则采取趋势策略，即在该点位开仓做多
-            values = break_price[RealFuture]['Bbreak'].values * g.amount * multiple  # value = 最新价 * 手数 * 保证金率 * 乘数
+            values = bar_data['close'][0] * g.amount * multiple  # value = 最新价 * 手数 * 保证金率 * 乘数
             order_value(RealFuture, values, style=StopMarketOrderStyle('stop_loss', break_price[RealFuture]['Bbreak'].values), side='long', pindex=0, close_today=False)
             print('开多仓'+str(RealFuture)+str(values))
             # print('当前仓位：'+str(context.portfolio.long_positions.keys()))
         elif bar_data['close'][0] < break_price[RealFuture]['Sbreak'].values and context.portfolio.available_cash > 500000:
             # 在空仓的情况下，如果盘中价格跌破突破卖出价，则采取趋势策略，即在该点位开仓做空
-            values = break_price[RealFuture]['Sbreak'].values * g.amount * multiple  # value = 最新价 * 手数 * 保证金率 * 乘数
+            values = bar_data['close'][0] * g.amount * multiple  # value = 最新价 * 手数 * 保证金率 * 乘数
             order_value(RealFuture, values, style=StopMarketOrderStyle('stop_loss', break_price[RealFuture]['Sbreak'].values), side='short', pindex=0, close_today=False)
             print('开空仓'+str(RealFuture)+str(values))
 
     else:
-        # 反转策略
+        # 反转策略，第一次反转时，相当于止损，之后反转则正常盈利
         if RealFuture in context.portfolio.long_positions.keys():  # 多仓
             if (g.maxmin_price[RealFuture]['max'].values > break_price[RealFuture]['Ssetup'].values) and (bar_data['close'][0] < break_price[RealFuture]['Senter'].values) and (context.portfolio.available_cash > 500000):
                 order_target(RealFuture, 0, side='long')  # 平仓
-                values = break_price[RealFuture]['Senter'].values * g.amount * multiple  # value = 最新价 * 手数 * 保证金率 * 乘数
+                values = bar_data['close'][0] * g.amount * multiple  # value = 最新价 * 手数 * 保证金率 * 乘数
                 order_value(RealFuture, values, style=StopMarketOrderStyle('stop_loss', break_price[RealFuture]['Senter'].values), side='short', pindex=0, close_today=False)
                 print('平仓开空仓'+str(RealFuture)+str(values))
 
         elif RealFuture in context.portfolio.short_positions.keys():  # 空仓
             if (g.maxmin_price[RealFuture]['min'].values < break_price[RealFuture]['Bsetup'].values) and (bar_data['close'][0] > break_price[RealFuture]['Benter'].values) and (context.portfolio.available_cash > 500000):
                 order_target(RealFuture, 0, side='short')  # 平仓
-                values = break_price[RealFuture]['Benter'].values * g.amount * multiple  # value = 最新价 * 手数 * 保证金率 * 乘数
+                values = bar_data['close'][0] * g.amount * multiple  # value = 最新价 * 手数 * 保证金率 * 乘数
                 order_value(RealFuture, values, style=StopMarketOrderStyle('stop_loss', break_price[RealFuture]['Benter'].values), side='long', pindex=0, close_today=False)
                 print('平仓开多仓'+str(RealFuture)+str(values))
 
@@ -175,8 +174,6 @@ def after_market_close(context):
     # for _trade in trades.values():
     #     log.info('成交记录：'+str(_trade))
     # 把参数置空，用于第二天的数据
-    g.MappingReal = {}  # 真实合约映射（key为symbol，value为主力合约）
-    g.MappingIndex = {}  # 指数合约映射 （key为 symbol，value为指数合约
     g.break_price = {}  # 突破价格映射
     g.maxmin_price = {}  # 存储各个期货品种的当日最高价和最低价
     log.info('一天结束')
@@ -187,7 +184,7 @@ def after_market_close(context):
 def get_maxmin_price(current_data, RealFuture):
     # 获取当日最高价和最低价
     if RealFuture not in g.maxmin_price.keys():
-        g.maxmin_price[RealFuture] = df(columns=['max', 'min'])
+        g.maxmin_price[RealFuture] = pd.DataFrame(columns=['max', 'min'])
         g.maxmin_price[RealFuture]['max'] = current_data['high']
         g.maxmin_price[RealFuture]['min'] = current_data['low']
     else:
@@ -198,6 +195,7 @@ def get_maxmin_price(current_data, RealFuture):
 
 
 # 移仓模块：当主力合约更换时，平当前持仓，更换为最新主力合约
+# 补充：R-breaker为日内高频交易策略，理论上不需要更换主力合约，仅仅放这儿表示期货交易基本流程
 def replace_old_futures(context,ins,dom):
 
     LastFuture = g.MappingReal[ins]
@@ -250,12 +248,12 @@ def set_break_price(context):
                 daily_ND = get_price(RealFuture, start_date=None, end_date=context.previous_date, frequency='daily',
                                      fields=['open', 'close', 'high', 'low'], skip_paused=False, fq='pre', count=1,
                                      panel=True)
-                # a,b,c,d设置参数
+                # a,b,c,d设置参数，参数可调
                 a = 0.35
                 b = 1.07
                 c = 0.07
                 d = 0.25
-                break_price = df(columns=['Ssetup', 'Bsetup', 'Senter', 'Benter', 'Bbreak', 'Sbreak'])
+                break_price = pd.DataFrame(columns=['Ssetup', 'Bsetup', 'Senter', 'Benter', 'Bbreak', 'Sbreak'])
                 break_price['Ssetup'] = daily_ND['high'] + a * (daily_ND['close'] - daily_ND['low'])
                 break_price['Bsetup'] = daily_ND['low'] - a * (daily_ND['high'] - daily_ND['close'])
 
