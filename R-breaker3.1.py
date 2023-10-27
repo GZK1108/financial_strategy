@@ -27,11 +27,11 @@ def initialize(context):
     # 开盘前运行
     run_daily(before_market_open, time='before_open', reference_security=get_future_code('JD'))
     # 开盘时运行，使用鸡蛋JD作为参考，即不交易夜盘
-    run_daily(market_open, time='every_bar', reference_security=get_future_code('JD'))
+    run_daily(market_open, time='every_bar', reference_security=get_future_code('RU'))
     # 收盘前运行
     run_daily(close_amount, time='14:59:59', reference_security=get_future_code('JD'))
     # 收盘后运行
-    run_daily(after_market_close, time='after_close', reference_security=get_future_code('JD'))
+    run_daily(after_market_close, time='03:00', reference_security=get_future_code('RU'))
 
 
 # 设置参数函数
@@ -42,13 +42,76 @@ def set_parameter(context):
     g.MappingIndex = {}  # 指数合约映射 （key为 symbol，value为指数合约
     g.break_price = {}  # 突破价格映射
     g.maxmin_price = {}  # 存储各个期货品种的当日最高价和最低价
-    g.amount = 10  # 设置默认交易的手数  value = 最新价 * 手数 * 保证金率 * 乘数
+    g.amount = 1  # 设置默认交易的手数  value = 最新价 * 手数 * 保证金率 * 乘数
     g.multiple = 10  # 设置交易的乘数
     g.stop_loss_price = 1  # 设置止损的点数
 
     # 交易的期货品种信息
-    g.instruments = ['RU', 'TA', 'PP', 'CU', 'AG', 'L', 'RB', 'I', 'J', 'JD']
+    # g.instruments = ['RU', 'TA', 'PP', 'CU', 'L', 'RB', 'I', 'J', 'JD']
+    g.instruments = ['A', 'AG', 'AL', 'AU','B', 'BB', 'BU', 'C','CF', 'CS', 'CU', 'ER','FB', 'FG', 'FU', 'GN',
+                    'HC', 'I', 'IC', 'IF','IH', 'J', 'JD', 'JM','JR', 'L', 'LR', 'M','MA', 'NI', 'OI',
+                    'P', 'PB', 'PM', 'PP','RB', 'RI', 'RM', 'RO','RS', 'RU', 'SF', 'SM', 'SN', 'SR', 'T', 'TA',
+                    'TC', 'TF', 'V', 'WH','WR', 'Y','ZN']
 
+    """
+    A 豆一 *
+    AG 白银 *
+    AL 铝*
+    AU 黄金*
+    B 豆二*
+    BB 胶合板
+    BU 沥青*
+    C 玉米*
+    CF 棉花*
+    CS 玉米淀粉*
+    CU 铜*
+    ER 早籼稻
+    FB 纤维板
+    FG 玻璃*
+    FU 燃料油*
+    GN 甘蔗
+    HC 热轧卷板*
+    I 铁矿石*
+    IC 中证500指数
+    IF 沪深300指数
+    IH 上证50指数
+    J 焦炭*
+    JD 鸡蛋
+    JM 焦煤*
+    JR 粳稻
+    L 塑料
+    LR 早籼稻
+    M 豆粕*
+    MA 甲醇*
+    NI 镍*
+    OI 菜籽油*
+    P 棕榈油*
+    PB 铅*
+    PM 普麦
+    PP 聚丙烯*
+    RB 螺纹钢*
+    RI 早籼稻
+    RM 菜籽粕*
+    RO 菜籽油*
+    RS 油菜籽
+    RU 橡胶*
+    SF 硅铁
+    SM 锰硅
+    SN 锡*
+    SR 白糖*
+    T 10年期国债
+    TA PTA*
+    TC 动力煤*
+    TF 5年期国债
+    V PVC
+    WH 强麦
+    WR 线材
+    Y 豆油*
+    ZN 锌*
+    """
+    # 以下为夜盘交易品种
+    g.instruments_eve = ['A', 'AG', 'AL', 'AU', 'B', 'BU', 'C', 'CF', 'CS', 'CU', 'FG', 'FU', 'HC', 'I', 'J', 'JM', 'M', 'MA', 'NI', 'OI',
+                    'P', 'PB', 'PP', 'RB', 'RM', 'RO', 'RU', 'SN', 'SR', 'TA', 'TC', 'Y', 'ZN']
     # 价格列表初始化
     set_future_list(context)
 
@@ -101,14 +164,20 @@ def judge(bar_data, context, RealFuture):
     else:
         # 反转策略，第一次反转时，相当于止损，之后反转则正常盈利
         if RealFuture in context.portfolio.long_positions.keys():  # 多仓
-            if (g.maxmin_price[RealFuture]['max'].values > break_price[RealFuture]['Ssetup'].values) and (bar_data['close'][0] < break_price[RealFuture]['Senter'].values) and (context.portfolio.available_cash > 500000):
+            if bar_data['close'][0] < break_price[RealFuture]['Sbreak'].values:
+                order_target(RealFuture, 0, side='long')  # 平仓
+                print('平多仓止损'+str(RealFuture))
+            elif (g.maxmin_price[RealFuture]['max'].values > break_price[RealFuture]['Ssetup'].values) and (bar_data['close'][0] < break_price[RealFuture]['Senter'].values) and (context.portfolio.available_cash > 500000):
                 order_target(RealFuture, 0, side='long')  # 平仓
                 values = bar_data['close'][0] * g.amount * multiple  # value = 最新价 * 手数 * 保证金率 * 乘数
                 order_value(RealFuture, values, style=StopMarketOrderStyle('stop_loss', break_price[RealFuture]['Senter'].values), side='short', pindex=0, close_today=False)
                 print('平仓开空仓'+str(RealFuture)+str(values))
 
         elif RealFuture in context.portfolio.short_positions.keys():  # 空仓
-            if (g.maxmin_price[RealFuture]['min'].values < break_price[RealFuture]['Bsetup'].values) and (bar_data['close'][0] > break_price[RealFuture]['Benter'].values) and (context.portfolio.available_cash > 500000):
+            if bar_data['close'][0] > break_price[RealFuture]['Bbreak'].values:
+                order_target(RealFuture, 0, side='short')
+                print('平空仓止损'+str(RealFuture))
+            elif (g.maxmin_price[RealFuture]['min'].values < break_price[RealFuture]['Bsetup'].values) and (bar_data['close'][0] > break_price[RealFuture]['Benter'].values) and (context.portfolio.available_cash > 500000):
                 order_target(RealFuture, 0, side='short')  # 平仓
                 values = bar_data['close'][0] * g.amount * multiple  # value = 最新价 * 手数 * 保证金率 * 乘数
                 order_value(RealFuture, values, style=StopMarketOrderStyle('stop_loss', break_price[RealFuture]['Benter'].values), side='long', pindex=0, close_today=False)
@@ -152,6 +221,8 @@ def market_open(context):
             # 当月合约交割日当天不开仓
             if (context.current_dt.date() == end_date):
                 return
+            elif '20:59:00' < str(context.current_dt.time()) < '02:31:00' and ins not in g.instruments_eve:
+                return
             else:
                 # 获取当前数据
                 current_data = get_bars(RealFuture, count=1, unit='1m', fields=['open', 'close', 'high', 'low'],
@@ -169,12 +240,8 @@ def market_open(context):
 # 收盘后运行函数
 def after_market_close(context):
     log.info(str('函数运行时间(after_market_close):'+str(context.current_dt.time())))
-    # 得到当天所有成交记录
-    # trades = get_trades()
-    # for _trade in trades.values():
-    #     log.info('成交记录：'+str(_trade))
+
     # 把参数置空，用于第二天的数据
-    g.break_price = {}  # 突破价格映射
     g.maxmin_price = {}  # 存储各个期货品种的当日最高价和最低价
     log.info('一天结束')
     log.info('##############################################################')
