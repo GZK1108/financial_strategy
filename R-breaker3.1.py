@@ -25,13 +25,15 @@ def initialize(context):
     # 设置滑点（单边万5，双边千1）
     set_slippage(PriceRelatedSlippage(0.001), type='future')
     # 开盘前运行
-    run_daily(before_market_open, time='before_open', reference_security=get_future_code('JD'))
+    run_daily(before_market_open, time='08:30', reference_security=get_future_code('JD'))
     # 开盘时运行，使用鸡蛋JD作为参考，即不交易夜盘
     run_daily(market_open, time='every_bar', reference_security=get_future_code('RU'))
     # 收盘前运行
-    run_daily(close_amount, time='14:59:59', reference_security=get_future_code('JD'))
+    run_daily(close_amount, time='14:59:59', reference_security=get_future_code('RU'))
+    # run_daily(close_amount, time='22:59:59', reference_security=get_future_code('RU')) # 目前添加了效果不好
     # 收盘后运行
     run_daily(after_market_close, time='03:00', reference_security=get_future_code('RU'))
+
 
 
 # 设置参数函数
@@ -42,16 +44,17 @@ def set_parameter(context):
     g.MappingIndex = {}  # 指数合约映射 （key为 symbol，value为指数合约
     g.break_price = {}  # 突破价格映射
     g.maxmin_price = {}  # 存储各个期货品种的当日最高价和最低价
-    g.amount = 1  # 设置默认交易的手数  value = 最新价 * 手数 * 保证金率 * 乘数
+    g.tradeAmount = {}  # 设置交易次数的映射，每交易一次则增加次数，改变阈值，防止过度交易
+    g.amount = 10  # 设置默认交易的手数
     g.multiple = 10  # 设置交易的乘数
-    g.stop_loss_price = 1  # 设置止损的点数
+
 
     # 交易的期货品种信息
-    # g.instruments = ['RU', 'TA', 'PP', 'CU', 'L', 'RB', 'I', 'J', 'JD']
-    g.instruments = ['A', 'AG', 'AL', 'AU','B', 'BB', 'BU', 'C','CF', 'CS', 'CU', 'ER','FB', 'FG', 'FU', 'GN',
-                    'HC', 'I', 'IC', 'IF','IH', 'J', 'JD', 'JM','JR', 'L', 'LR', 'M','MA', 'NI', 'OI',
-                    'P', 'PB', 'PM', 'PP','RB', 'RI', 'RM', 'RO','RS', 'RU', 'SF', 'SM', 'SN', 'SR', 'T', 'TA',
-                    'TC', 'TF', 'V', 'WH','WR', 'Y','ZN']
+    # g.instruments = ['A', 'AG', 'AL', 'AU','B', 'BB', 'BU', 'C', 'CF'] 'AG','AL', 'AU','I', 'ZN',
+    g.instruments = ['A',  'B', 'BB', 'BU', 'C', 'CF', 'CS', 'CU', 'ER','FB', 'FG', 'FU', 'GN',
+                    'HC', 'J', 'JD', 'JM','JR', 'L', 'LR', 'M','MA', 'NI', 'OI',
+                    'P', 'PB', 'PM', 'PP','RB', 'RI', 'RM', 'RO','RS', 'RU', 'SF', 'SM', 'SN', 'SR', 'TA',
+                    'TC', 'V', 'WH','WR', 'Y']
 
     """
     A 豆一 *
@@ -72,9 +75,9 @@ def set_parameter(context):
     GN 甘蔗
     HC 热轧卷板*
     I 铁矿石*
-    IC 中证500指数
-    IF 沪深300指数
-    IH 上证50指数
+    # IC 中证500指数
+    # IF 沪深300指数
+    # IH 上证50指数
     J 焦炭*
     JD 鸡蛋
     JM 焦煤*
@@ -99,10 +102,8 @@ def set_parameter(context):
     SM 锰硅
     SN 锡*
     SR 白糖*
-    T 10年期国债
     TA PTA*
     TC 动力煤*
-    TF 5年期国债
     V PVC
     WH 强麦
     WR 线材
@@ -138,9 +139,12 @@ def judge(bar_data, context, RealFuture):
     # log.info('当前可用保证金：' , context.portfolio.available_cash)
 
     # 设置合约乘数
-    symbol = RealFuture[:2]
-    multiple = get_lots(symbol)
+    # symbol = RealFuture[:2]
+    # multiple = get_lots(symbol)
     break_price = g.break_price
+    amount = g.amount
+    # 设置一个系数，随着交易次数增加而变化，防止过度交易
+    beta = 1 + 0.01 * g.tradeAmount[RealFuture]
 
     # 持仓情况
     # print('多仓：'+str(context.portfolio.long_positions))
@@ -148,18 +152,19 @@ def judge(bar_data, context, RealFuture):
     # 突破策略，该策略用于在价格高于（低于）突破买入价（突破卖出价）时，采取趋势策略，即在该点位开仓做多（做空）
     # 首先判断是否有持仓，若持仓，则判断止损，若不持仓，则判断是否满足开仓条件
     if (RealFuture not in context.portfolio.long_positions.keys()) and (RealFuture not in context.portfolio.short_positions.keys()):
-
-        if bar_data['close'][0] > break_price[RealFuture]['Bbreak'].values and context.portfolio.available_cash > 500000:
+        if bar_data['close'][0] > beta * break_price[RealFuture]['Bbreak'].values and context.portfolio.available_cash > 500000:
             # 在空仓的情况下，如果盘中价格超过突破买入价，则采取趋势策略，即在该点位开仓做多
-            values = bar_data['close'][0] * g.amount * multiple  # value = 最新价 * 手数 * 保证金率 * 乘数
-            order_value(RealFuture, values, style=StopMarketOrderStyle('stop_loss', break_price[RealFuture]['Bbreak'].values), side='long', pindex=0, close_today=False)
-            print('开多仓'+str(RealFuture)+str(values))
+            # values = bar_data['close'][0] * g.amount * multiple  # value = 最新价 * 手数 * 保证金率 * 乘数
+            order(RealFuture, amount, style=StopMarketOrderStyle('stop_loss', break_price[RealFuture]['Bbreak'].values), side='long', pindex=0, close_today=False)
+            g.tradeAmount[RealFuture] += 1  # 交易次数+1，修改后面的系数
+            print('开多仓'+str(RealFuture)+str(amount))
             # print('当前仓位：'+str(context.portfolio.long_positions.keys()))
-        elif bar_data['close'][0] < break_price[RealFuture]['Sbreak'].values and context.portfolio.available_cash > 500000:
+        elif beta * bar_data['close'][0] < break_price[RealFuture]['Sbreak'].values and context.portfolio.available_cash > 500000:
             # 在空仓的情况下，如果盘中价格跌破突破卖出价，则采取趋势策略，即在该点位开仓做空
-            values = bar_data['close'][0] * g.amount * multiple  # value = 最新价 * 手数 * 保证金率 * 乘数
-            order_value(RealFuture, values, style=StopMarketOrderStyle('stop_loss', break_price[RealFuture]['Sbreak'].values), side='short', pindex=0, close_today=False)
-            print('开空仓'+str(RealFuture)+str(values))
+            # values = bar_data['close'][0] * g.amount * multiple  # value = 最新价 * 手数 * 保证金率 * 乘数
+            order(RealFuture, amount, style=StopMarketOrderStyle('stop_loss', break_price[RealFuture]['Sbreak'].values), side='short', pindex=0, close_today=False)
+            g.tradeAmount[RealFuture] += 1  # 交易次数+1，修改后面的系数
+            print('开空仓'+str(RealFuture)+str(amount))
 
     else:
         # 反转策略，第一次反转时，相当于止损，之后反转则正常盈利
@@ -169,9 +174,10 @@ def judge(bar_data, context, RealFuture):
                 print('平多仓止损'+str(RealFuture))
             elif (g.maxmin_price[RealFuture]['max'].values > break_price[RealFuture]['Ssetup'].values) and (bar_data['close'][0] < break_price[RealFuture]['Senter'].values) and (context.portfolio.available_cash > 500000):
                 order_target(RealFuture, 0, side='long')  # 平仓
-                values = bar_data['close'][0] * g.amount * multiple  # value = 最新价 * 手数 * 保证金率 * 乘数
-                order_value(RealFuture, values, style=StopMarketOrderStyle('stop_loss', break_price[RealFuture]['Senter'].values), side='short', pindex=0, close_today=False)
-                print('平仓开空仓'+str(RealFuture)+str(values))
+                # values = bar_data['close'][0] * g.amount * multiple  # value = 最新价 * 手数 * 保证金率 * 乘数
+                order(RealFuture, amount, style=StopMarketOrderStyle('stop_loss', break_price[RealFuture]['Senter'].values), side='short', pindex=0, close_today=False)
+                g.tradeAmount[RealFuture] += 1  # 交易次数+1，修改后面的系数
+                print('平仓开空仓'+str(RealFuture)+str(amount))
 
         elif RealFuture in context.portfolio.short_positions.keys():  # 空仓
             if bar_data['close'][0] > break_price[RealFuture]['Bbreak'].values:
@@ -179,9 +185,10 @@ def judge(bar_data, context, RealFuture):
                 print('平空仓止损'+str(RealFuture))
             elif (g.maxmin_price[RealFuture]['min'].values < break_price[RealFuture]['Bsetup'].values) and (bar_data['close'][0] > break_price[RealFuture]['Benter'].values) and (context.portfolio.available_cash > 500000):
                 order_target(RealFuture, 0, side='short')  # 平仓
-                values = bar_data['close'][0] * g.amount * multiple  # value = 最新价 * 手数 * 保证金率 * 乘数
-                order_value(RealFuture, values, style=StopMarketOrderStyle('stop_loss', break_price[RealFuture]['Benter'].values), side='long', pindex=0, close_today=False)
-                print('平仓开多仓'+str(RealFuture)+str(values))
+                # values = bar_data['close'][0] * g.amount * multiple  # value = 最新价 * 手数 * 保证金率 * 乘数
+                order(RealFuture, amount, style=StopMarketOrderStyle('stop_loss', break_price[RealFuture]['Benter'].values), side='long', pindex=0, close_today=False)
+                g.tradeAmount[RealFuture] += 1  # 交易次数+1，修改后面的系数
+                print('平仓开多仓'+str(RealFuture)+str(amount))
 
 
 # 开盘前运行函数
@@ -243,6 +250,7 @@ def after_market_close(context):
 
     # 把参数置空，用于第二天的数据
     g.maxmin_price = {}  # 存储各个期货品种的当日最高价和最低价
+    g.tradeAmount = {}  # 设置交易次数的映射，每交易一次则增加次数，改变阈值，防止过度交易
     log.info('一天结束')
     log.info('##############################################################')
 
@@ -316,8 +324,8 @@ def set_break_price(context):
                                      fields=['open', 'close', 'high', 'low'], skip_paused=False, fq='pre', count=1,
                                      panel=True)
                 # a,b,c,d设置参数，参数可调
-                a = 0.35
-                b = 1.07
+                a = 0.35 # 0.35
+                b = 1.07 # 1.07
                 c = 0.07
                 d = 0.25
                 break_price = pd.DataFrame(columns=['Ssetup', 'Bsetup', 'Senter', 'Benter', 'Bbreak', 'Sbreak'])
@@ -331,7 +339,9 @@ def set_break_price(context):
                 break_price['Sbreak'] = break_price['Bsetup'] - d * (break_price['Ssetup'] - break_price['Bsetup'])
                 break_price.index = [context.current_dt]
                 g.break_price[RealFuture] = break_price  # 传入全局变量，用于Judge函数
-
+                # 从大到小输出，观察参数设置是否有误
+                # print(break_price.T.sort_values(by=context.current_dt,ascending=False))
+                g.tradeAmount[RealFuture] = 0  # 初始化交易次数
 
 # 获取合约乘数函数
 def get_lots(symbol):
